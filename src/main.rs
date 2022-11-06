@@ -17,20 +17,20 @@ async fn main() {
     let jar = std::sync::Arc::new(jar);
     let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).build().unwrap();
     let test = client.post("http://127.0.0.1:8000/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
-    /*let bruh = client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate1")]).send().await.unwrap();
     let mut store = jar.lock().unwrap();
 
   for c in store.iter_any() {
     println!("Got cookie {},{}\n", &c.name(),&c.value());
     println!("Decrypted value: Name={}, value={:?}",&c.name(),unseal(c.name(),c.value()));
-  }*/
-  let tmp = encrypt_cookie("votertoken", "1");
-  println!("Encrypted val: {}",&tmp);
-  println!("{:?}",unseal("votertoken",&tmp));
+  }
+  let bruh = client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate1")]).send().await.unwrap();
+
 }
+
 // taken from the cookie secure crate
 fn unseal(name: &str, value: &str) -> Result<String, &'static str> {
-    let key = Key::derive_from(b"2bChvsu8Ko4rk1jYV5xijcAN5IQVdI+wBdz9lEJRUdY=");
+    let key = Key::derive_from(base64::decode("2bChvsu8Ko4rk1jYV5xijcAN5IQVdI+wBdz9lEJRUdY=").unwrap().as_slice());
+
     // cookie is in URL format which will make base64 throw a fit, decode cookie content
     let cstring = decode(value).expect("utf8").into_owned();
     println!("decoded string is {}", &cstring);
