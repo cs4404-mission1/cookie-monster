@@ -1,10 +1,14 @@
-use reqwest::{ClientBuilder, Client, cookie, cookie::Jar};
-use reqwest_cookie_store::*;
+use reqwest;
+use reqwest_cookie_store;
 use aes_gcm::aead::{generic_array::GenericArray, Aead, AeadInPlace, KeyInit, Payload};
 use aes_gcm::Aes256Gcm;
-use ::cookie::Key;
+use ::cookie::{Key, Cookie};
 use urlencoding::decode;
 use rand::RngCore;
+use tokio::time::timeout;
+use std::time::Duration;
+use url::Url;
+use std::thread::{self, JoinHandle};
 
 pub const NONCE_LEN: usize = 12;
 pub const TAG_LEN: usize = 16;
@@ -12,20 +16,76 @@ pub const KEY_LEN: usize = 32;
 
 #[tokio::main]
 async fn main() {
+    crasher();
     let jar = reqwest_cookie_store::CookieStore::default();
     let jar = reqwest_cookie_store::CookieStoreMutex::new(jar);
     let jar = std::sync::Arc::new(jar);
     let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).build().unwrap();
     let test = client.post("http://127.0.0.1:8000/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
-    let mut store = jar.lock().unwrap();
-
-  for c in store.iter_any() {
+    let bruh1 = client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+    {
+        let mut decrypted: String = String::from("1");
+        let mut store = jar.lock().unwrap();
+        for c in store.iter_unexpired() {
+        println!("Got cookie {},{}\n", &c.name(),&c.value());
+        decrypted = unseal(c.name(),c.value()).unwrap();
+        println!("Decrypted value: Name={}, value={}",&c.name(),&decrypted);
+        }
+        store.clear();
+        let nv: u32 = decrypted.parse::<u32>().unwrap() + 1;
+        let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &nv.to_string()));
+        store.insert_raw(&newcookie, &Url::parse("http://127.0.0.1").unwrap()).unwrap();
+    }
+  println!("Real vote status: {}",bruh1.status());
+  let bruh2 = timeout(Duration::from_secs(1), client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate3")]).send()).await.unwrap().unwrap();
+  {
+    let store = jar.lock().unwrap();
+    for c in store.iter_unexpired() {
     println!("Got cookie {},{}\n", &c.name(),&c.value());
-    println!("Decrypted value: Name={}, value={:?}",&c.name(),unseal(c.name(),c.value()));
-  }
-  let bruh = client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate1")]).send().await.unwrap();
-
+    let decrypted = unseal(c.name(),c.value()).unwrap();
+    println!("Decrypted value: Name={}, value={}",&c.name(),&decrypted);
+    }
+  
 }
+  println!("Falsified vote status: {}",bruh2.status());
+}
+/*Crasher? I hardly Know 'er!
+spawns threads to crash webserver by spamming login requests */
+fn crasher() {
+    let mut crashers: Vec<JoinHandle<()>> = vec!();
+    for i in 0..128{
+    let a = thread::spawn(move || {
+    loop{
+        let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(3000)).build().unwrap();
+        match client.post("http://127.0.0.1:8000/login").form(&[("ssn", "1"),("password","jalskdjfh43u4halksdflkajsdlfkjasfy2323ADSFLSkasdfasd")]).send(){
+            Ok(_) => (),
+            Err(e) => {
+                println!("crasher thread {} {}",i,e);
+                break;
+            }
+        }
+        }
+    });
+    let b = thread::spawn(move || {
+        loop{
+            let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(3000)).build().unwrap();
+            match client.get("http://127.0.0.1:8000/results").send(){
+                Ok(_) => (),
+                Err(e) => {
+                    println!("crasher thread {} {}",i,e);
+                    break;
+                }
+            }
+            } 
+    });
+    crashers.push(a);
+    crashers.push(b);
+    }
+    for t in crashers.into_iter(){
+        t.join().unwrap();
+    }
+}
+
 
 // taken from the cookie secure crate
 fn unseal(name: &str, value: &str) -> Result<String, &'static str> {
@@ -33,7 +93,6 @@ fn unseal(name: &str, value: &str) -> Result<String, &'static str> {
 
     // cookie is in URL format which will make base64 throw a fit, decode cookie content
     let cstring = decode(value).expect("utf8").into_owned();
-    println!("decoded string is {}", &cstring);
     let data = base64::decode(cstring).map_err(|_| "bad base64 value")?;
     if data.len() <= NONCE_LEN {
         return Err("length of decoded data is <= NONCE_LEN");
@@ -50,7 +109,7 @@ fn unseal(name: &str, value: &str) -> Result<String, &'static str> {
 
 fn encrypt_cookie(name: &str, value: &str) -> String {
     // Create a vec to hold the [nonce | cookie value | tag].
-    let key = Key::derive_from(b"2bChvsu8Ko4rk1jYV5xijcAN5IQVdI+wBdz9lEJRUdY=");
+    let key = Key::derive_from(base64::decode("2bChvsu8Ko4rk1jYV5xijcAN5IQVdI+wBdz9lEJRUdY=").unwrap().as_slice());
     let cookie_val = value.as_bytes();
     let mut data = vec![0; NONCE_LEN + cookie_val.len() + TAG_LEN];
 

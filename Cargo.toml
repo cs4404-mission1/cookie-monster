@@ -11,11 +11,11 @@ aes-gcm = "0.10.1"
 base64 = "0.13.1"
 urlencoding = "2.1.2"
 rand = "0.8.5"
-
+url = "2.3.1"
 
 [dependencies.reqwest]
 version = "0.11.12"
-features = ["cookies"]
+features = ["cookies","blocking"]
 
 [dependencies.cookie]
 version = "0.16"
