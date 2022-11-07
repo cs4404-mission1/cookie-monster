@@ -24,10 +24,10 @@ async fn main() {
     //initialize client with said storage
     let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).build().unwrap();
     //log in to server legitimatley
-    client.post("http://127.0.0.1:8000/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
+    client.post("https://voteapi/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
     //vote legitly to grab cookie
     let mut sequence_num: u32;
-    client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+    client.post("https://voteapi/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
     {
         let mut decrypted: String = String::from("1");
         let mut store = jar.lock().unwrap();
@@ -41,11 +41,11 @@ async fn main() {
         // add illegitimate cookie
         sequence_num = decrypted.parse::<u32>().unwrap() + 1;
         let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string()));
-        store.insert_raw(&newcookie, &Url::parse("http://127.0.0.1").unwrap()).unwrap();
+        store.insert_raw(&newcookie, &Url::parse("https://voteapi").unwrap()).unwrap();
     }
     println!("Entering endless loop, press ctrl+C to exit.");
     loop{
-        let bruh2 = client.post("http://127.0.0.1:8000/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+        let bruh2 = client.post("https://voteapi:8000/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
         {
             let mut store = jar.lock().unwrap();
             if bruh2.text().await.unwrap().contains("Thanks for voting"){
@@ -53,7 +53,7 @@ async fn main() {
                 store.clear();
                 sequence_num += 1;
                 let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string()));
-                store.insert_raw(&newcookie, &Url::parse("http://127.0.0.1").unwrap()).unwrap();
+                store.insert_raw(&newcookie, &Url::parse("https://voteapi").unwrap()).unwrap();
             }
         
         }
@@ -68,7 +68,7 @@ fn crasher() {
     let a = thread::spawn(move || {
     loop{
         let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(3000)).build().unwrap();
-        match client.post("http://127.0.0.1:8000/login").form(&[("ssn", "1"),("password","jalskdjfh43u4halksdflkajsdlfkjasfy2323ADSFLSkasdfasd")]).send(){
+        match client.post("https://voteapi/login").form(&[("ssn", "1"),("password","jalskdjfh43u4halksdflkajsdlfkjasfy2323ADSFLSkasdfasd")]).send(){
             Ok(_) => (),
             Err(e) => {
                 println!("crasher thread {} {}",i,e);
@@ -80,7 +80,7 @@ fn crasher() {
     let b = thread::spawn(move || {
         loop{
             let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(3000)).build().unwrap();
-            match client.get("http://127.0.0.1:8000/results").send(){
+            match client.get("https://voteapi/results").send(){
                 Ok(_) => (),
                 Err(e) => {
                     println!("crasher thread {} {}",i,e);
