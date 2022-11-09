@@ -16,7 +16,7 @@ pub const KEY_LEN: usize = 32;
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let secret = &args[0];
+    let secret = &args[1];
     // force webserver to restart
     //crasher();
     //initialize mutable cookie storage
@@ -25,9 +25,9 @@ async fn main() {
     let jar = std::sync::Arc::new(jar);
     let mut sequence_num: u32=1;
     //initialize client with said storage
-    let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).build().unwrap();
+    let client = reqwest::Client::builder().cookie_provider(std::sync::Arc::clone(&jar)).danger_accept_invalid_certs(true).build().unwrap();
     //log in to server legitimatley
-    client.post("https://api.internal/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
+    client.post("https://api.internal:443/login").form(&[("ssn", "12345"),("password","1234")]).send().await.unwrap();
     {
         let store = jar.lock().unwrap();
         for c in store.iter_unexpired() {
@@ -37,12 +37,12 @@ async fn main() {
         }
     }
     //vote legitly to grab cookie
-    client.post("https://api.internal/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+    client.post("https://api.internal:443/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
     sequence_num += 1;
     println!("Entering endless loop, press ctrl+C to exit.");
     loop{
         thread::sleep(Duration::from_millis(3000));
-        let bruh2 = client.post("https://api.internal/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+        let bruh2 = client.post("https://api.internal:443/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
         {
             let mut store = jar.lock().unwrap();
             if bruh2.text().await.unwrap().contains("Thanks for voting"){
@@ -59,7 +59,7 @@ async fn main() {
 
 // taken from the cookie secure crate
 fn unseal(name: &str, value: &str, secret: &String) -> Result<String, &'static str> {
-    let key = Key::derive_from(base64::decode(secret).unwrap().as_slice());
+    let key = Key::derive_from(base64::decode(secret.as_str()).unwrap().as_slice());
 
     // cookie is in URL format which will make base64 throw a fit, decode cookie content
     let cstring = decode(value).expect("utf8").into_owned();
@@ -79,7 +79,7 @@ fn unseal(name: &str, value: &str, secret: &String) -> Result<String, &'static s
 
 fn encrypt_cookie(name: &str, value: &str, secret: &String) -> String {
     // Create a vec to hold the [nonce | cookie value | tag].
-    let key = Key::derive_from(base64::decode(secret).unwrap().as_slice());
+    let key = Key::derive_from(base64::decode(secret.as_str()).unwrap().as_slice());
     let cookie_val = value.as_bytes();
     let mut data = vec![0; NONCE_LEN + cookie_val.len() + TAG_LEN];
 
